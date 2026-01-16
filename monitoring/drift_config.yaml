@@ -1,0 +1,122 @@
+# =============================================================================
+# NutriGuard ML Model Drift Detection Configuration
+# MLOps monitoring for model performance degradation
+# =============================================================================
+
+# Drift Detection Settings
+drift_detection:
+  enabled: true
+  model_name: "nutriguard-food-classifier"
+  model_version: "v1.2.0"
+  
+  # Confidence threshold for flagging predictions
+  confidence_threshold: 0.85
+  
+  # Precision threshold for drift alerts
+  precision_threshold: 0.85
+  
+  # Minimum samples before triggering drift analysis
+  min_sample_size: 100
+  
+  # Time window for rolling metrics (in hours)
+  rolling_window_hours: 24
+
+# Alerting Configuration
+alerting:
+  enabled: true
+  channels:
+    - type: slack
+      webhook_url: "${SLACK_WEBHOOK_URL}"
+      channel: "#mlops-alerts"
+    - type: pagerduty
+      service_key: "${PAGERDUTY_SERVICE_KEY}"
+      severity: "warning"
+    - type: email
+      recipients:
+        - "mlops-team@nutriguard.io"
+        - "oncall@nutriguard.io"
+  
+  # Alert conditions
+  triggers:
+    - name: "precision_drop"
+      condition: "precision < 0.85"
+      severity: "critical"
+      message: "Model precision has dropped below 85% threshold"
+    
+    - name: "confidence_distribution_shift"
+      condition: "avg_confidence < 0.80"
+      severity: "warning"
+      message: "Average prediction confidence has decreased significantly"
+    
+    - name: "high_review_rate"
+      condition: "flagged_percentage > 0.30"
+      severity: "warning"
+      message: "More than 30% of predictions require human review"
+
+# Data Collection Settings
+data_collection:
+  # Store prediction logs for analysis
+  prediction_logging:
+    enabled: true
+    storage: "bigquery"
+    dataset: "nutriguard_mlops"
+    table: "prediction_logs"
+    retention_days: 90
+  
+  # Ground truth collection from clinician feedback
+  feedback_collection:
+    enabled: true
+    storage: "bigquery"
+    dataset: "nutriguard_mlops"
+    table: "clinician_feedback"
+    retention_days: 365
+
+# Retraining Pipeline Configuration
+retraining:
+  # Automatic retraining when drift is detected
+  auto_retrain: false
+  
+  # Manual approval required
+  require_approval: true
+  approvers:
+    - "ml-lead@nutriguard.io"
+  
+  # Vertex AI Pipeline configuration
+  pipeline:
+    project_id: "${GCP_PROJECT_ID}"
+    region: "us-central1"
+    pipeline_name: "nutriguard-retraining-pipeline"
+    
+  # Training parameters
+  training:
+    epochs: 50
+    batch_size: 32
+    learning_rate: 0.001
+    validation_split: 0.2
+
+# Monitoring Dashboard
+dashboard:
+  enabled: true
+  provider: "grafana"
+  url: "https://monitoring.nutriguard.io/d/mlops"
+  
+  # Key metrics to display
+  metrics:
+    - name: "model_precision"
+      query: "precision_gauge"
+      threshold: 0.85
+    
+    - name: "predictions_per_minute"
+      query: "rate(predictions_total[1m])"
+    
+    - name: "flagged_predictions_rate"
+      query: "rate(flagged_predictions_total[1m]) / rate(predictions_total[1m])"
+    
+    - name: "average_inference_latency_ms"
+      query: "histogram_quantile(0.95, inference_duration_seconds)"
+
+# Feature Store Integration (Future)
+feature_store:
+  enabled: false
+  provider: "vertex_ai_feature_store"
+  # TODO: Configure when implementing real ML pipeline
