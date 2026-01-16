@@ -33,29 +33,128 @@ graph TD
     end
 ```
 
-### 🔄 Data Flow: Food Analysis
+### 🔄 Data Flow: Complete System Sequence
 
-The core workflow involves a clinician reviewing a food item, which is then sent to the backend for analysis.
+The following diagrams illustrate the complete request lifecycle through NutriGuard's backend architecture.
+
+#### Part 1: Analysis Flow
 
 ```mermaid
 sequenceDiagram
-    participant C as Clinician (UI)
-    participant F as Next.js Frontend
-    participant B as Flask API
-    participant M as AI Model (Mock)
-
-    C->>F: Uploads Food Image
-    F->>B: POST /analyze (Base64 Image)
-    B->>B: Validate Request (Pydantic)
-    B->>M: Inference Request
-    M-->>B: Prediction (Food, Calories, Confidence)
+    autonumber
     
-    alt Confidence < 0.85
-        B-->>F: Return Result (Flagged: "Human Review Needed")
-        F->>C: Display Alert "Review Required"
-    else Confidence >= 0.85
-        B-->>F: Return Result (Status: "Verified")
-        F->>C: Display Result
+    participant User as 👨‍⚕️ User<br/>(Doctor/Patient)
+    participant API as 🖥️ API<br/>(Flask Server)
+    participant Validator as 🛡️ Validator<br/>(Pydantic Model)
+    participant AI_Engine as 🤖 AI_Engine<br/>(Mock Simulation)
+    
+    User->>+API: POST /analyze<br/>{"image_base64": "...", "food_description": "..."}
+    
+    API->>+Validator: Validate request schema
+    
+    alt ❌ Invalid Schema
+        Validator-->>API: ValidationError
+        API-->>User: 422 Unprocessable Entity<br/>{"error": "Validation Error", "details": [...]}
+    else ✅ Valid Schema
+        Validator-->>-API: FoodAnalysisRequest object
+        
+        API->>+AI_Engine: simulate_ai_analysis()
+        
+        Note over AI_Engine: ⏱️ Simulating inference latency...<br/>time.sleep(1.0)
+        
+        AI_Engine->>AI_Engine: random.choice(MOCK_FOOD_DATABASE)
+        AI_Engine->>AI_Engine: confidence = random.uniform(0.70, 0.99)
+        
+        AI_Engine-->>-API: {"food_name": "Salmon", "calories": 280, "confidence": 0.82}
+        
+        API->>API: Check confidence threshold
+        
+        alt 🚨 Confidence < 0.85
+            Note over API: requires_human_review = True
+            API-->>User: 200 OK<br/>{"food_name": "Salmon", "confidence": 0.82,<br/>"requires_human_review": true}
+            Note over User: ⚠️ UI displays "Review Required" alert
+        else ✅ Confidence >= 0.85
+            Note over API: requires_human_review = False
+            API-->>-User: 200 OK<br/>{"food_name": "Salmon", "confidence": 0.94,<br/>"requires_human_review": false}
+            Note over User: ✓ UI displays verified result
+        end
+    end
+```
+
+#### Part 2: MLOps Feedback Loop
+
+```mermaid
+sequenceDiagram
+    autonumber
+    
+    participant User as 👨‍⚕️ User<br/>(Doctor/Patient)
+    participant API as 🖥️ API<br/>(Flask Server)
+    participant MLOps as 📊 MLOps_System<br/>(Drift Detection)
+    participant Logs as 📁 EVALUATION_LOGS<br/>(In-Memory Store)
+    
+    Note over User,Logs: Clinician reviews a flagged prediction and submits correction
+    
+    User->>+API: POST /feedback<br/>{"scan_id": "scan-2", "is_correct": false,<br/>"actual_food": "Quinoa Salad"}
+    
+    API->>API: Validate required fields
+    
+    alt ❌ Missing Fields
+        API-->>User: 400 Bad Request<br/>{"error": "Missing required field: scan_id"}
+    else ✅ Valid Feedback
+        API->>+Logs: Append feedback entry<br/>{"scan_id", "is_correct", "actual_food", "timestamp"}
+        Logs-->>-API: Entry saved (total: N)
+        
+        API-->>-User: 201 Created<br/>{"status": "success", "total_feedback_count": N}
+    end
+    
+    Note over User,Logs: Later: Dashboard requests model health metrics
+    
+    User->>+API: GET /metrics
+    
+    API->>+MLOps: Calculate precision from EVALUATION_LOGS
+    
+    MLOps->>+Logs: Read all feedback entries
+    Logs-->>-MLOps: [entry1, entry2, ..., entryN]
+    
+    MLOps->>MLOps: precision = correct_count / total_count
+    
+    alt 🚨 Precision < 0.85 (DRIFT_THRESHOLD)
+        Note over MLOps: ⚠️ Model degradation detected!
+        MLOps-->>API: {"precision": 0.78, "drift_status": "Drift Detected"}
+        API-->>User: 200 OK<br/>{"precision": 0.78, "drift_status": "Drift Detected",<br/>"model_version": "nutriguard-v1.2.0"}
+        Note over User: 🔴 Dashboard shows drift alert<br/>→ Trigger retraining pipeline
+    else ✅ Precision >= 0.85
+        MLOps-->>-API: {"precision": 0.92, "drift_status": "Stable"}
+        API-->>-User: 200 OK<br/>{"precision": 0.92, "drift_status": "Stable",<br/>"model_version": "nutriguard-v1.2.0"}
+        Note over User: 🟢 Dashboard shows healthy status
+    end
+```
+
+#### Combined System Overview
+
+```mermaid
+flowchart LR
+    subgraph "1️⃣ Analysis Phase"
+        A[POST /analyze] --> V{Pydantic<br/>Valid?}
+        V -->|No| E1[422 Error]
+        V -->|Yes| AI[AI Engine<br/>1.0s latency]
+        AI --> C{Confidence<br/>≥ 85%?}
+        C -->|Yes| R1[✅ Verified]
+        C -->|No| R2[⚠️ Flagged]
+    end
+    
+    subgraph "2️⃣ Review Phase"
+        R2 --> REV[Clinician<br/>Reviews]
+        REV --> FB[POST /feedback]
+    end
+    
+    subgraph "3️⃣ MLOps Phase"
+        FB --> LOGS[(Evaluation<br/>Logs)]
+        LOGS --> METRICS[GET /metrics]
+        METRICS --> D{Precision<br/>≥ 85%?}
+        D -->|Yes| S[🟢 Stable]
+        D -->|No| DRIFT[🔴 Drift<br/>Detected]
+        DRIFT -.->|Trigger| RETRAIN[Vertex AI<br/>Retraining]
     end
 ```
 
