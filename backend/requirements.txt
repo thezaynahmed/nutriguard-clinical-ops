@@ -1,0 +1,8 @@
+# Production dependencies for Clinical Food Analysis API
+flask>=3.0.0
+flask-cors>=4.0.0
+pydantic>=2.5.0
+gunicorn>=21.2.0
+
+# Optional: For enhanced production logging
+python-json-logger>=2.0.0

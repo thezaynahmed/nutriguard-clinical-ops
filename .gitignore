@@ -1,0 +1,33 @@
+# General
+.DS_Store
+*.log
+
+# Editors
+.vscode/
+.idea/
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+build/
+coverage/
+
+# Environment Variables (CRITICAL)
+.env
+.env.local
+.env.*.local
+*.env
