@@ -1,0 +1,149 @@
+# =============================================================================
+# NutriGuard Kubernetes Services
+# Load Balancer configuration for GKE
+# =============================================================================
+
+---
+# Backend Service (Internal ClusterIP for inter-service communication)
+apiVersion: v1
+kind: Service
+metadata:
+  name: nutriguard-backend-svc
+  namespace: nutriguard
+  labels:
+    app: nutriguard
+    component: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: nutriguard
+    component: backend
+  ports:
+    - name: http
+      protocol: TCP
+      port: 5001
+      targetPort: 5001
+
+---
+# Frontend Service (External LoadBalancer)
+apiVersion: v1
+kind: Service
+metadata:
+  name: nutriguard-frontend-lb
+  namespace: nutriguard
+  labels:
+    app: nutriguard
+    component: frontend
+  annotations:
+    # GKE-specific annotations for Cloud Load Balancing
+    cloud.google.com/neg: '{"ingress": true}'
+    cloud.google.com/backend-config: '{"default": "nutriguard-backend-config"}'
+spec:
+  type: LoadBalancer
+  selector:
+    app: nutriguard
+    component: frontend
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 3000
+    - name: https
+      protocol: TCP
+      port: 443
+      targetPort: 3000
+  # Optional: Reserve a static IP
+  # loadBalancerIP: 35.XXX.XXX.XXX
+  sessionAffinity: None
+  externalTrafficPolicy: Cluster
+
+---
+# Namespace Definition
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nutriguard
+  labels:
+    name: nutriguard
+    environment: production
+
+---
+# ConfigMap for non-sensitive configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nutriguard-config
+  namespace: nutriguard
+data:
+  NEXTAUTH_URL: "https://nutriguard.example.com"
+  LOG_LEVEL: "INFO"
+  ENVIRONMENT: "production"
+
+---
+# Backend Config for Cloud Load Balancing health checks
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: nutriguard-backend-config
+  namespace: nutriguard
+spec:
+  healthCheck:
+    checkIntervalSec: 15
+    timeoutSec: 5
+    healthyThreshold: 2
+    unhealthyThreshold: 3
+    type: HTTP
+    requestPath: /health
+    port: 5001
+  connectionDraining:
+    drainingTimeoutSec: 60
+  cdn:
+    enabled: false
+  logging:
+    enable: true
+    sampleRate: 1.0
+
+---
+# Horizontal Pod Autoscaler for Backend
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nutriguard-backend-hpa
+  namespace: nutriguard
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nutriguard-backend
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max

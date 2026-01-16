@@ -1,0 +1,189 @@
+# =============================================================================
+# NutriGuard Backend Deployment
+# Kubernetes Deployment manifest for GKE
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nutriguard-backend
+  namespace: nutriguard
+  labels:
+    app: nutriguard
+    component: backend
+    environment: production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nutriguard
+      component: backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: nutriguard
+        component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5001"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: nutriguard-backend-sa
+      
+      # Pod Anti-Affinity for HA across zones
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - nutriguard
+                topologyKey: "topology.kubernetes.io/zone"
+      
+      containers:
+        - name: backend
+          image: gcr.io/nutriguard-prod/backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5001
+              protocol: TCP
+              name: http
+          
+          # Resource Management
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          
+          # Health Checks
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          
+          # Environment Variables
+          env:
+            - name: FLASK_ENV
+              value: "production"
+            - name: PORT
+              value: "5001"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/var/secrets/google/key.json"
+          
+          # Volume Mounts
+          volumeMounts:
+            - name: gcp-credentials
+              mountPath: /var/secrets/google
+              readOnly: true
+      
+      volumes:
+        - name: gcp-credentials
+          secret:
+            secretName: gcp-service-account-key
+      
+      # Graceful shutdown
+      terminationGracePeriodSeconds: 30
+
+---
+# =============================================================================
+# NutriGuard Frontend Deployment
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nutriguard-frontend
+  namespace: nutriguard
+  labels:
+    app: nutriguard
+    component: frontend
+    environment: production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nutriguard
+      component: frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: nutriguard
+        component: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: gcr.io/nutriguard-prod/frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+              name: http
+          
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              value: "http://nutriguard-backend-svc:5001"
+            - name: NEXTAUTH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: nutriguard-config
+                  key: NEXTAUTH_URL
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: nutriguard-secrets
+                  key: NEXTAUTH_SECRET
+      
+      terminationGracePeriodSeconds: 30
